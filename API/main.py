@@ -7,11 +7,11 @@ from datetime import datetime
 import csv
 import json
 import os
+import re
 import shutil
 import subprocess
-import time
 import sys
-import re
+import time
 
 
 # ============================================================
@@ -27,7 +27,7 @@ PARAMETERS_FILE = INPUTS_DIR / "parameters.json"
 PIPELINE_FILE = PROJECT_ROOT / "src" / "pipeline.py"
 
 # Uses the Python interpreter running this FastAPI application.
-# This works locally and inside Docker/Render.
+# Works locally and inside Docker/Render.
 PYTHON_EXE = Path(sys.executable)
 
 SHARED_RESULTS_DIR = PROJECT_ROOT / "results"
@@ -51,7 +51,7 @@ SHARED_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 app = FastAPI(
     title="LAMMPS Automation API",
     description="API for automated LAMMPS simulation, analysis and OVITO visualization.",
-    version="2.1.0",
+    version="2.2.0",
 )
 
 
@@ -62,7 +62,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,  # must be False when allow_origins is "*"
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -103,9 +103,7 @@ def load_json(path: Path, default=None):
         return default
 
     try:
-        return json.loads(
-            path.read_text(encoding="utf-8")
-        )
+        return json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return default
 
@@ -125,9 +123,7 @@ def get_next_run_id() -> str:
             continue
 
         try:
-            numbers.append(
-                int(folder.name.replace("run_", ""))
-            )
+            numbers.append(int(folder.name.replace("run_", "")))
         except ValueError:
             continue
 
@@ -173,9 +169,7 @@ def write_status(
             "stage": stage,
             "experiment_id": experiment_id,
             "message": message,
-            "updated_at": datetime.now().isoformat(
-                timespec="seconds"
-            ),
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
         },
     )
 
@@ -186,10 +180,7 @@ def write_status(
 
 def read_pipeline_status(experiment_id: str):
     folder = run_folder(experiment_id)
-
-    path = folder / "pipeline_status.json"
-
-    return load_json(path, None)
+    return load_json(folder / "pipeline_status.json", None)
 
 
 # ============================================================
@@ -198,11 +189,11 @@ def read_pipeline_status(experiment_id: str):
 
 def snapshot_outputs(experiment_id: str) -> None:
     """
-    The current scientific pipeline writes output files to the
-    shared results/ and reports/ directories.
+    The scientific pipeline writes output files to the shared
+    results/ and reports/ directories.
 
     After successful completion, copy those outputs into the
-    individual experiment directory.
+    individual experiment directory and create completed.json.
     """
 
     folder = run_folder(experiment_id)
@@ -210,15 +201,8 @@ def snapshot_outputs(experiment_id: str) -> None:
     snapshot_results = folder / "results"
     snapshot_reports = folder / "reports"
 
-    snapshot_results.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    snapshot_reports.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    snapshot_results.mkdir(parents=True, exist_ok=True)
+    snapshot_reports.mkdir(parents=True, exist_ok=True)
 
     result_files = [
         "properties.csv",
@@ -256,11 +240,35 @@ def snapshot_outputs(experiment_id: str) -> None:
         folder / "completed.json",
         {
             "experiment_id": experiment_id,
-            "completed_at": datetime.now().isoformat(
-                timespec="seconds"
-            ),
+            "completed_at": datetime.now().isoformat(timespec="seconds"),
         },
     )
+
+
+# ============================================================
+# ENSURE COMPLETED
+# ============================================================
+
+def ensure_completed(experiment_id: str) -> bool:
+    """
+    Returns True if the experiment is completed.
+
+    If the pipeline reports "completed" but completed.json has not
+    been created yet, the outputs are snapshotted now.
+    """
+
+    folder = run_folder(experiment_id)
+
+    if (folder / "completed.json").exists():
+        return True
+
+    pipeline_status = read_pipeline_status(experiment_id)
+
+    if pipeline_status and pipeline_status.get("status") == "completed":
+        snapshot_outputs(experiment_id)
+        return True
+
+    return False
 
 
 # ============================================================
@@ -283,11 +291,7 @@ def read_properties(experiment_id: str) -> dict:
 
     values = {}
 
-    with path.open(
-        "r",
-        encoding="utf-8-sig",
-        newline="",
-    ) as file:
+    with path.open("r", encoding="utf-8-sig", newline="") as file:
         reader = csv.reader(file)
 
         for row in reader:
@@ -312,17 +316,10 @@ def read_properties(experiment_id: str) -> dict:
 def read_deformation(experiment_id: str) -> dict:
     folder = run_folder(experiment_id)
 
-    summary_path = (
-        folder
-        / "reports"
-        / "visualization_summary.txt"
-    )
+    summary_path = folder / "reports" / "visualization_summary.txt"
 
     if not summary_path.exists():
-        summary_path = (
-            SHARED_REPORTS_DIR
-            / "visualization_summary.txt"
-        )
+        summary_path = SHARED_REPORTS_DIR / "visualization_summary.txt"
 
     if summary_path.exists():
         text = summary_path.read_text(
@@ -348,40 +345,29 @@ def read_deformation(experiment_id: str) -> dict:
             return None
 
         return {
-            "frame": number_after(
-                "Final Frame",
-                "Frame",
-            ),
+            "frame": number_after("Final frame", "Frame"),
             "atom_count": number_after(
+                "Number of atoms",
                 "Atoms",
                 "Atom Count",
             ),
-            "mean_displacement": number_after(
-                "Mean Displacement",
-            ),
+            "mean_displacement": number_after("Mean displacement"),
             "max_displacement": number_after(
-                "Maximum",
+                "Maximum displacement",
                 "Max Displacement",
-                "Maximum Displacement",
+                "Maximum",
             ),
             "min_displacement": number_after(
-                "Minimum",
+                "Minimum displacement",
                 "Min Displacement",
-                "Minimum Displacement",
+                "Minimum",
             ),
         }
 
-    path = (
-        folder
-        / "results"
-        / "deformation_results.csv"
-    )
+    path = folder / "results" / "deformation_results.csv"
 
     if not path.exists():
-        path = (
-            SHARED_RESULTS_DIR
-            / "deformation_results.csv"
-        )
+        path = SHARED_RESULTS_DIR / "deformation_results.csv"
 
     if not path.exists():
         raise HTTPException(
@@ -389,11 +375,7 @@ def read_deformation(experiment_id: str) -> dict:
             detail="OVITO deformation results are not available yet.",
         )
 
-    with path.open(
-        "r",
-        encoding="utf-8-sig",
-        newline="",
-    ) as file:
+    with path.open("r", encoding="utf-8-sig", newline="") as file:
         rows = list(csv.DictReader(file))
 
     if not rows:
@@ -402,66 +384,33 @@ def read_deformation(experiment_id: str) -> dict:
             detail="OVITO deformation results are empty.",
         )
 
-    row = rows[-1]
+    # deformation_results.csv holds one row per atom
+    # (Atom_ID, Displacement_Magnitude), so compute statistics.
+    values = []
 
-    normalized = {
-        str(key)
-        .strip()
-        .lower()
-        .replace(" ", "_")
-        .replace("-", "_"): value
-        for key, value in row.items()
-        if key is not None
-    }
-
-    def find_number(*names):
-        normalized_names = [
-            name.lower()
-            .replace(" ", "_")
-            .replace("-", "_")
-            for name in names
-        ]
-
-        for name in normalized_names:
-            if name in normalized:
+    for row in rows:
+        for key, value in row.items():
+            if key and "displacement" in key.lower():
                 try:
-                    return float(normalized[name])
+                    values.append(float(value))
                 except (TypeError, ValueError):
                     pass
 
-        for key, value in normalized.items():
-            if value in (None, ""):
-                continue
-
-            if any(name in key for name in normalized_names):
-                try:
-                    return float(value)
-                except (TypeError, ValueError):
-                    pass
-
-        return None
+    if not values:
+        return {
+            "frame": None,
+            "atom_count": float(len(rows)),
+            "mean_displacement": None,
+            "max_displacement": None,
+            "min_displacement": None,
+        }
 
     return {
-        "frame": find_number(
-            "frame",
-            "frames",
-        ),
-        "atom_count": find_number(
-            "atom_count",
-            "atoms",
-            "particles",
-        ),
-        "mean_displacement": find_number(
-            "mean_displacement",
-        ),
-        "max_displacement": find_number(
-            "max_displacement",
-            "maximum_displacement",
-        ),
-        "min_displacement": find_number(
-            "min_displacement",
-            "minimum_displacement",
-        ),
+        "frame": None,
+        "atom_count": float(len(values)),
+        "mean_displacement": sum(values) / len(values),
+        "max_displacement": max(values),
+        "min_displacement": min(values),
     }
 
 
@@ -472,11 +421,7 @@ def read_deformation(experiment_id: str) -> dict:
 def visualization_file(experiment_id: str) -> Path:
     folder = run_folder(experiment_id)
 
-    path = (
-        folder
-        / "reports"
-        / "ovito_deformation.png"
-    )
+    path = folder / "reports" / "ovito_deformation.png"
 
     if path.exists():
         return path
@@ -506,7 +451,7 @@ def home():
     return {
         "message": "LAMMPS Automation API is running",
         "status": "online",
-        "version": "2.1.0",
+        "version": "2.2.0",
     }
 
 
@@ -560,10 +505,7 @@ def create_experiment(data: ExperimentRequest):
     run_id = get_next_run_id()
 
     folder = SIMULATIONS_DIR / run_id
-    folder.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    folder.mkdir(parents=True, exist_ok=True)
 
     parameters = {
         "materials": material,
@@ -573,16 +515,10 @@ def create_experiment(data: ExperimentRequest):
     }
 
     # Keep compatibility with the current generate_inputs.py.
-    save_json(
-        PARAMETERS_FILE,
-        parameters,
-    )
+    save_json(PARAMETERS_FILE, parameters)
 
     # Store a copy for this experiment.
-    save_json(
-        folder / "parameters.json",
-        parameters,
-    )
+    save_json(folder / "parameters.json", parameters)
 
     write_status(
         run_id,
@@ -596,9 +532,7 @@ def create_experiment(data: ExperimentRequest):
         "status": "created",
         "experiment_id": run_id,
         "parameters": parameters,
-        "message": (
-            f"Experiment {run_id} created successfully."
-        ),
+        "message": f"Experiment {run_id} created successfully.",
     }
 
 
@@ -613,60 +547,31 @@ def list_experiments():
     folders = [
         path
         for path in SIMULATIONS_DIR.iterdir()
-        if path.is_dir()
-        and path.name.startswith("run_")
+        if path.is_dir() and path.name.startswith("run_")
     ]
 
-    folders.sort(
-        key=lambda path: path.name,
-        reverse=True,
-    )
+    folders.sort(key=lambda path: path.name, reverse=True)
 
     for folder in folders:
         experiment_id = folder.name
 
-        params = load_json(
-            folder / "parameters.json",
-            {},
-        ) or {}
+        params = load_json(folder / "parameters.json", {}) or {}
+        status_data = load_json(folder / "status.json", {}) or {}
 
-        status_data = load_json(
-            folder / "status.json",
-            {},
-        ) or {}
-
-        completed = (
-            folder / "completed.json"
-        ).exists()
+        completed = (folder / "completed.json").exists()
 
         record = {
             "experiment_id": experiment_id,
-            "material": str(
-                params.get(
-                    "materials",
-                    "silicon",
-                )
-            ).title(),
-            "temperature": params.get(
-                "temperature"
-            ),
-            "deformation": params.get(
-                "deformation"
-            ),
-            "strain_rate": params.get(
-                "strain_rate"
-            ),
+            "material": str(params.get("materials", "silicon")).title(),
+            "temperature": params.get("temperature"),
+            "deformation": params.get("deformation"),
+            "strain_rate": params.get("strain_rate"),
             "status": (
                 "completed"
                 if completed
-                else status_data.get(
-                    "status",
-                    "created",
-                )
+                else status_data.get("status", "created")
             ),
-            "updated_at": status_data.get(
-                "updated_at"
-            ),
+            "updated_at": status_data.get("updated_at"),
             "bulk_modulus": None,
             "shear_modulus": None,
             "poisson_ratio": None,
@@ -674,29 +579,39 @@ def list_experiments():
 
         if completed:
             try:
-                properties = read_properties(
-                    experiment_id
-                )
+                properties = read_properties(experiment_id)
 
-                record["bulk_modulus"] = properties.get(
-                    "Bulk Modulus"
-                )
-
-                record["shear_modulus"] = properties.get(
-                    "Shear Modulus 1"
-                )
-
-                record["poisson_ratio"] = properties.get(
-                    "Poisson Ratio"
-                )
+                record["bulk_modulus"] = properties.get("Bulk Modulus")
+                record["shear_modulus"] = properties.get("Shear Modulus 1")
+                record["poisson_ratio"] = properties.get("Poisson Ratio")
 
             except HTTPException:
                 pass
 
         records.append(record)
 
+    return {"experiments": records}
+
+
+# ============================================================
+# COMPARE EXPERIMENTS
+# (defined before the {experiment_id} routes on purpose)
+# ============================================================
+
+@app.get("/api/experiments/compare")
+def compare_experiments(first: str, second: str):
+    if first == second:
+        raise HTTPException(
+            status_code=400,
+            detail="Choose two different experiments.",
+        )
+
+    first_data = experiment_results(first)
+    second_data = experiment_results(second)
+
     return {
-        "experiments": records
+        "first": first_data,
+        "second": second_data,
     }
 
 
@@ -714,14 +629,9 @@ def run_experiment(experiment_id: str):
             detail="pipeline.py was not found.",
         )
 
-    existing = EXPERIMENT_PROCESSES.get(
-        experiment_id
-    )
+    existing = EXPERIMENT_PROCESSES.get(experiment_id)
 
-    if (
-        existing
-        and existing["process"].poll() is None
-    ):
+    if existing and existing["process"].poll() is None:
         return {
             "status": "already_running",
             "experiment_id": experiment_id,
@@ -731,22 +641,20 @@ def run_experiment(experiment_id: str):
     env = os.environ.copy()
     env["LAMMPS_RUN_ID"] = experiment_id
 
+    # Needed so OVITO / Qt can run without a display (Render, Docker).
+    env.setdefault("QT_QPA_PLATFORM", "offscreen")
+    env.setdefault("MPLBACKEND", "Agg")
+
     try:
         process = subprocess.Popen(
-            [
-                str(PYTHON_EXE),
-                str(PIPELINE_FILE),
-            ],
+            [str(PYTHON_EXE), str(PIPELINE_FILE)],
             cwd=str(PROJECT_ROOT),
             env=env,
         )
     except Exception as error:
         raise HTTPException(
             status_code=500,
-            detail=(
-                "Failed to start LAMMPS pipeline: "
-                f"{error}"
-            ),
+            detail=f"Failed to start LAMMPS pipeline: {error}",
         )
 
     EXPERIMENT_PROCESSES[experiment_id] = {
@@ -778,7 +686,7 @@ def experiment_status(experiment_id: str):
     folder = run_folder(experiment_id)
 
     # --------------------------------------------------------
-    # COMPLETED
+    # ALREADY COMPLETED
     # --------------------------------------------------------
 
     if (folder / "completed.json").exists():
@@ -787,57 +695,37 @@ def experiment_status(experiment_id: str):
             "progress": 100,
             "stage": "COMPLETED",
             "experiment_id": experiment_id,
-            "message": (
-                "LAMMPS automation completed successfully."
-            ),
+            "message": "LAMMPS automation completed successfully.",
         }
 
     # --------------------------------------------------------
     # REAL PIPELINE STATUS
     # --------------------------------------------------------
 
-    pipeline_status = read_pipeline_status(
-        experiment_id
-    )
+    pipeline_status = read_pipeline_status(experiment_id)
 
     if pipeline_status:
-        status = str(
-            pipeline_status.get(
-                "status",
-                "running",
-            )
-        )
+        status = str(pipeline_status.get("status", "running"))
 
         try:
-            progress = int(
-                pipeline_status.get(
-                    "progress",
-                    10,
-                )
-            )
+            progress = int(pipeline_status.get("progress", 10))
         except (TypeError, ValueError):
             progress = 10
 
-        progress = max(
-            0,
-            min(progress, 100),
-        )
+        progress = max(0, min(progress, 100))
 
-        stage = str(
-            pipeline_status.get(
-                "stage",
-                "INITIALIZING",
-            )
-        )
-
-        message = str(
-            pipeline_status.get(
-                "message",
-                "Pipeline is running.",
-            )
-        )
+        stage = str(pipeline_status.get("stage", "INITIALIZING"))
+        message = str(pipeline_status.get("message", "Pipeline is running."))
 
         if status == "failed":
+            write_status(
+                experiment_id,
+                "failed",
+                progress,
+                "FAILED",
+                message,
+            )
+
             return {
                 "status": "failed",
                 "progress": progress,
@@ -847,6 +735,36 @@ def experiment_status(experiment_id: str):
             }
 
         if status == "completed":
+            # IMPORTANT: copy outputs and create completed.json,
+            # otherwise /results keeps returning 409.
+            try:
+                snapshot_outputs(experiment_id)
+
+                write_status(
+                    experiment_id,
+                    "completed",
+                    100,
+                    "COMPLETED",
+                    message,
+                )
+
+            except Exception as error:
+                write_status(
+                    experiment_id,
+                    "failed",
+                    100,
+                    "FAILED",
+                    f"Pipeline finished but saving results failed: {error}",
+                )
+
+                return {
+                    "status": "failed",
+                    "progress": 100,
+                    "stage": "FAILED",
+                    "experiment_id": experiment_id,
+                    "message": f"Saving results failed: {error}",
+                }
+
             return {
                 "status": "completed",
                 "progress": 100,
@@ -854,6 +772,35 @@ def experiment_status(experiment_id: str):
                 "experiment_id": experiment_id,
                 "message": message,
             }
+
+        # Status says "running": make sure the process did not die
+        # without updating the status file (crash, restart, etc.).
+        process_info = EXPERIMENT_PROCESSES.get(experiment_id)
+
+        if process_info:
+            return_code = process_info["process"].poll()
+
+            if return_code is not None and return_code != 0:
+                failure_message = (
+                    "LAMMPS pipeline exited "
+                    f"with code {return_code}."
+                )
+
+                write_status(
+                    experiment_id,
+                    "failed",
+                    progress,
+                    "FAILED",
+                    failure_message,
+                )
+
+                return {
+                    "status": "failed",
+                    "progress": progress,
+                    "stage": "FAILED",
+                    "experiment_id": experiment_id,
+                    "message": failure_message,
+                }
 
         return {
             "status": "running",
@@ -864,12 +811,10 @@ def experiment_status(experiment_id: str):
         }
 
     # --------------------------------------------------------
-    # PROCESS FALLBACK
+    # PROCESS FALLBACK (no pipeline_status.json yet)
     # --------------------------------------------------------
 
-    process_info = EXPERIMENT_PROCESSES.get(
-        experiment_id
-    )
+    process_info = EXPERIMENT_PROCESSES.get(experiment_id)
 
     if process_info:
         process = process_info["process"]
@@ -878,19 +823,14 @@ def experiment_status(experiment_id: str):
         if return_code is not None:
             if return_code == 0:
                 try:
-                    snapshot_outputs(
-                        experiment_id
-                    )
+                    snapshot_outputs(experiment_id)
 
                     write_status(
                         experiment_id,
                         "completed",
                         100,
                         "COMPLETED",
-                        (
-                            "LAMMPS automation "
-                            "completed successfully."
-                        ),
+                        "LAMMPS automation completed successfully.",
                     )
 
                     return {
@@ -898,10 +838,7 @@ def experiment_status(experiment_id: str):
                         "progress": 100,
                         "stage": "COMPLETED",
                         "experiment_id": experiment_id,
-                        "message": (
-                            "LAMMPS automation "
-                            "completed successfully."
-                        ),
+                        "message": "LAMMPS automation completed successfully.",
                     }
 
                 except Exception as error:
@@ -910,10 +847,7 @@ def experiment_status(experiment_id: str):
                         "failed",
                         100,
                         "FAILED",
-                        (
-                            "Pipeline finished but "
-                            f"output saving failed: {error}"
-                        ),
+                        f"Pipeline finished but output saving failed: {error}",
                     )
 
                     return {
@@ -921,21 +855,19 @@ def experiment_status(experiment_id: str):
                         "progress": 100,
                         "stage": "FAILED",
                         "experiment_id": experiment_id,
-                        "message": (
-                            "Pipeline finished but "
-                            "saving results failed."
-                        ),
+                        "message": "Pipeline finished but saving results failed.",
                     }
+
+            failure_message = (
+                f"LAMMPS pipeline exited with code {return_code}."
+            )
 
             write_status(
                 experiment_id,
                 "failed",
                 100,
                 "FAILED",
-                (
-                    "LAMMPS pipeline exited "
-                    f"with code {return_code}."
-                ),
+                failure_message,
             )
 
             return {
@@ -943,10 +875,7 @@ def experiment_status(experiment_id: str):
                 "progress": 100,
                 "stage": "FAILED",
                 "experiment_id": experiment_id,
-                "message": (
-                    "LAMMPS pipeline exited "
-                    f"with code {return_code}."
-                ),
+                "message": failure_message,
             }
 
     # --------------------------------------------------------
@@ -958,9 +887,7 @@ def experiment_status(experiment_id: str):
         "progress": 10,
         "stage": "INITIALIZING",
         "experiment_id": experiment_id,
-        "message": (
-            "LAMMPS automation is starting."
-        ),
+        "message": "LAMMPS automation is starting.",
     }
 
 
@@ -970,11 +897,9 @@ def experiment_status(experiment_id: str):
 
 @app.get("/api/experiments/{experiment_id}/results")
 def experiment_results(experiment_id: str):
-    folder = run_folder(experiment_id)
+    run_folder(experiment_id)
 
-    if not (
-        folder / "completed.json"
-    ).exists():
+    if not ensure_completed(experiment_id):
         raise HTTPException(
             status_code=409,
             detail="Experiment has not completed yet.",
@@ -983,18 +908,11 @@ def experiment_results(experiment_id: str):
     return {
         "status": "completed",
         "experiment_id": experiment_id,
-        "parameters": get_parameters(
-            experiment_id
-        ),
-        "properties": read_properties(
-            experiment_id
-        ),
-        "deformation": read_deformation(
-            experiment_id
-        ),
+        "parameters": get_parameters(experiment_id),
+        "properties": read_properties(experiment_id),
+        "deformation": read_deformation(experiment_id),
         "visualization_url": (
-            f"/api/experiments/"
-            f"{experiment_id}/visualization"
+            f"/api/experiments/{experiment_id}/visualization"
         ),
     }
 
@@ -1005,26 +923,18 @@ def experiment_results(experiment_id: str):
 
 @app.get("/api/experiments/{experiment_id}/visualization")
 def experiment_visualization(experiment_id: str):
-    path = visualization_file(
-        experiment_id
-    )
+    path = visualization_file(experiment_id)
 
     if not path.exists():
         raise HTTPException(
             status_code=404,
-            detail=(
-                "OVITO visualization "
-                "is not available yet."
-            ),
+            detail="OVITO visualization is not available yet.",
         )
 
     return FileResponse(
         path,
         media_type="image/png",
-        filename=(
-            f"{experiment_id}"
-            "_ovito_deformation.png"
-        ),
+        filename=f"{experiment_id}_ovito_deformation.png",
     )
 
 
@@ -1034,11 +944,9 @@ def experiment_visualization(experiment_id: str):
 
 @app.get("/api/experiments/{experiment_id}/report")
 def experiment_report(experiment_id: str):
-    folder = run_folder(experiment_id)
+    run_folder(experiment_id)
 
-    if not (
-        folder / "completed.json"
-    ).exists():
+    if not ensure_completed(experiment_id):
         raise HTTPException(
             status_code=409,
             detail="Experiment has not completed yet.",
@@ -1046,40 +954,8 @@ def experiment_report(experiment_id: str):
 
     return {
         "experiment_id": experiment_id,
-        "parameters": get_parameters(
-            experiment_id
-        ),
-        "properties": read_properties(
-            experiment_id
-        ),
-        "deformation": read_deformation(
-            experiment_id
-        ),
-        "generated_at": datetime.now().isoformat(
-            timespec="seconds"
-        ),
-    }
-
-
-# ============================================================
-# COMPARE EXPERIMENTS
-# ============================================================
-
-@app.get("/api/experiments/compare")
-def compare_experiments(
-    first: str,
-    second: str,
-):
-    if first == second:
-        raise HTTPException(
-            status_code=400,
-            detail="Choose two different experiments.",
-        )
-
-    first_data = experiment_results(first)
-    second_data = experiment_results(second)
-
-    return {
-        "first": first_data,
-        "second": second_data,
+        "parameters": get_parameters(experiment_id),
+        "properties": read_properties(experiment_id),
+        "deformation": read_deformation(experiment_id),
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
     }
