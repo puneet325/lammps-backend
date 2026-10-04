@@ -10,13 +10,14 @@ import os
 import shutil
 import subprocess
 import time
+import sys
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SIMULATIONS_DIR = PROJECT_ROOT / "simulations"
 INPUTS_DIR = PROJECT_ROOT / "inputs"
 PARAMETERS_FILE = INPUTS_DIR / "parameters.json"
 PIPELINE_FILE = PROJECT_ROOT / "src" / "pipeline.py"
-PYTHON_EXE = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
+PYTHON_EXE = Path(sys.executable)
 SHARED_RESULTS_DIR = PROJECT_ROOT / "results"
 SHARED_REPORTS_DIR = PROJECT_ROOT / "reports"
 
@@ -328,8 +329,7 @@ def run_experiment(experiment_id: str):
     folder = run_folder(experiment_id)
     if not PIPELINE_FILE.exists():
         raise HTTPException(status_code=500, detail="pipeline.py was not found.")
-    if not PYTHON_EXE.exists():
-        raise HTTPException(status_code=500, detail=f"Python environment not found: {PYTHON_EXE}")
+    # In Docker/Render, sys.executable points to the Python interpreter inside the container.
 
     existing = EXPERIMENT_PROCESSES.get(experiment_id)
     if existing and existing["process"].poll() is None:
@@ -399,7 +399,7 @@ def experiment_results(experiment_id: str):
         "parameters": get_parameters(experiment_id),
         "properties": read_properties(experiment_id),
         "deformation": read_deformation(experiment_id),
-        "visualization_url": f"http://127.0.0.1:8000/api/experiments/{experiment_id}/visualization",
+        "visualization_url": f"/api/experiments/{experiment_id}/visualization",
     }
 
 
