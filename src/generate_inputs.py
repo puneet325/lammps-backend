@@ -8,7 +8,12 @@ import re
 # PROJECT PATHS
 # ============================================================
 
-PROJECT_FOLDER = r"C:\Users\Dell\Desktop\lammps-automation"
+PROJECT_FOLDER = os.path.abspath(
+    os.path.join(
+        os.path.dirname(__file__),
+        ".."
+    )
+)
 
 PARAMETERS_FILE = os.path.join(
     PROJECT_FOLDER,
@@ -16,9 +21,11 @@ PARAMETERS_FILE = os.path.join(
     "parameters.json"
 )
 
-LAMMPS_EXAMPLE_FOLDER = (
-    r"C:\Users\Dell\Desktop\lammps"
-    r"\examples\ELASTIC_T\DEFORMATION\Silicon"
+LAMMPS_EXAMPLE_FOLDER = os.path.join(
+    PROJECT_FOLDER,
+    "HPC",
+    "project",
+    "lammps_examples"
 )
 
 
@@ -26,7 +33,10 @@ LAMMPS_EXAMPLE_FOLDER = (
 # GET RUN ID
 # ============================================================
 
-RUN_ID = os.environ.get("LAMMPS_RUN_ID", "run_001")
+RUN_ID = os.environ.get(
+    "LAMMPS_RUN_ID",
+    "run_001"
+)
 
 SIMULATION_FOLDER = os.path.join(
     PROJECT_FOLDER,
@@ -49,8 +59,14 @@ os.makedirs(
 # READ PARAMETERS
 # ============================================================
 
+if not os.path.exists(PARAMETERS_FILE):
+    raise FileNotFoundError(
+        f"Parameters file not found: {PARAMETERS_FILE}"
+    )
+
 with open(PARAMETERS_FILE, "r") as file:
     parameters = json.load(file)
+
 
 temperature = parameters["temperature"]
 deformation = parameters["deformation"]
@@ -78,31 +94,58 @@ if material.lower() != "silicon":
     raise ValueError(
         "Currently only Silicon is connected to the existing "
         "LAMMPS template. Additional materials require their "
-        "own LAMMPS templates and potentials."
+        "own simulation templates."
     )
 
 
 # ============================================================
-# COPY COMPLETE LAMMPS EXAMPLE
+# CHECK TEMPLATE FOLDER
 # ============================================================
 
 if not os.path.exists(LAMMPS_EXAMPLE_FOLDER):
     raise FileNotFoundError(
-        f"LAMMPS example folder not found:\n"
+        f"LAMMPS template folder not found: "
         f"{LAMMPS_EXAMPLE_FOLDER}"
     )
 
-print("Copying LAMMPS example...")
 
-shutil.copytree(
-    LAMMPS_EXAMPLE_FOLDER,
-    SIMULATION_FOLDER,
-    dirs_exist_ok=True
-)
+# ============================================================
+# COPY LAMMPS TEMPLATE FILES
+# ============================================================
+
+files_to_copy = [
+    "in.elastic",
+    "init.mod",
+    "potential.mod",
+    "displace.mod",
+    "Si.sw"
+]
+
+for filename in files_to_copy:
+
+    source = os.path.join(
+        LAMMPS_EXAMPLE_FOLDER,
+        filename
+    )
+
+    destination = os.path.join(
+        SIMULATION_FOLDER,
+        filename
+    )
+
+    if not os.path.exists(source):
+        raise FileNotFoundError(
+            f"Required template file not found: {source}"
+        )
+
+    shutil.copy2(
+        source,
+        destination
+    )
 
 
 # ============================================================
-# PARAMETERIZE init.mod
+# UPDATE PARAMETERS IN init.mod
 # ============================================================
 
 init_file = os.path.join(
@@ -110,99 +153,75 @@ init_file = os.path.join(
     "init.mod"
 )
 
-if not os.path.exists(init_file):
-    raise FileNotFoundError(
-        f"init.mod not found:\n{init_file}"
-    )
-
-
 with open(init_file, "r") as file:
-    init_data = file.read()
+    content = file.read()
 
 
-# ============================================================
-# REPLACE TEMPERATURE
-# ============================================================
-
-temperature_pattern = (
-    r"variable\s+temp\s+equal\s+[0-9.eE+-]+"
+# Temperature
+content = re.sub(
+    r"variable\s+temp\s+equal\s+[^\n]+",
+    f"variable temp equal {temperature} # temperature from parameters.json",
+    content
 )
 
-temperature_replacement = (
-    f"variable temp equal {temperature}"
+
+# Deformation
+content = re.sub(
+    r"variable\s+up\s+equal\s+[^\n]+",
+    f"variable up equal {deformation}",
+    content
 )
 
-new_init_data, temp_replacements = re.subn(
-    temperature_pattern,
-    temperature_replacement,
-    init_data,
-    count=1
+
+# Strain rate
+content = re.sub(
+    r"variable\s+erate\s+equal\s+[^\n]+",
+    f"variable erate equal {strain_rate}",
+    content
 )
 
-if temp_replacements != 1:
-    raise RuntimeError(
-        "Could not find the temperature variable in init.mod."
-    )
-
-
-# ============================================================
-# REPLACE DEFORMATION
-# ============================================================
-
-deformation_pattern = (
-    r"variable\s+up\s+equal\s+[0-9.eE+-]+"
-)
-
-deformation_replacement = (
-    f"variable up equal {deformation}"
-)
-
-new_init_data, deformation_replacements = re.subn(
-    deformation_pattern,
-    deformation_replacement,
-    new_init_data,
-    count=1
-)
-
-if deformation_replacements != 1:
-    raise RuntimeError(
-        "Could not find the deformation variable 'up' in init.mod."
-    )
-
-
-# ============================================================
-# WRITE MODIFIED init.mod
-# ============================================================
 
 with open(init_file, "w") as file:
-    file.write(new_init_data)
+    file.write(content)
 
 
 # ============================================================
-# VERIFY
+# VERIFY GENERATED VALUES
 # ============================================================
-
-print()
-print("LAMMPS input parameterized successfully.")
 
 with open(init_file, "r") as file:
-
-    for line in file:
-
-        if line.strip().startswith(
-            "variable temp equal"
-        ):
-            print("Verified:", line.strip())
-
-        if line.strip().startswith(
-            "variable up equal"
-        ):
-            print("Verified:", line.strip())
+    generated_content = file.read()
 
 
+if f"variable up equal {deformation}" not in generated_content:
+    raise RuntimeError(
+        "Deformation parameter was not correctly written "
+        "to init.mod"
+    )
+
+
+if f"variable temp equal {temperature}" not in generated_content:
+    raise RuntimeError(
+        "Temperature parameter was not correctly written "
+        "to init.mod"
+    )
+
+
+print("Input parameters successfully applied.")
+print(f"Temperature : {temperature}")
+print(f"Deformation: {deformation}")
+print(f"Strain rate: {strain_rate}")
 print()
-print("Simulation folder:")
-print(os.path.abspath(SIMULATION_FOLDER))
 
+
+# ============================================================
+# COMPLETE
+# ============================================================
+
+print("========================================")
+print("       INPUT GENERATION COMPLETE")
+print("========================================")
 print()
-print("Input generation completed.")
+print(f"Simulation folder:")
+print(SIMULATION_FOLDER)
+print()
