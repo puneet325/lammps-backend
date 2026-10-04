@@ -25,22 +25,12 @@ RUN_ID = os.environ.get(
 
 
 # ============================================================
-# PYTHON ENVIRONMENTS
+# PYTHON EXECUTABLE
 # ============================================================
 
-MAIN_PYTHON = os.path.join(
-    PROJECT_FOLDER,
-    ".venv",
-    "Scripts",
-    "python.exe"
-)
-
-OVITO_PYTHON = os.path.join(
-    PROJECT_FOLDER,
-    "ovito-env",
-    "Scripts",
-    "python.exe"
-)
+# Uses the Python interpreter currently running this pipeline.
+# Works locally and inside Docker/Render.
+PYTHON_EXECUTABLE = sys.executable
 
 
 # ============================================================
@@ -78,20 +68,14 @@ print()
 
 pipeline_environment = os.environ.copy()
 
-pipeline_environment[
-    "LAMMPS_RUN_ID"
-] = RUN_ID
+pipeline_environment["LAMMPS_RUN_ID"] = RUN_ID
 
 
 # ============================================================
 # RUN FUNCTION
 # ============================================================
 
-def run_step(
-    name,
-    python_executable,
-    script
-):
+def run_step(name, script):
 
     print()
     print("=" * 60)
@@ -100,12 +84,16 @@ def run_step(
     print()
 
     command = [
-        python_executable,
+        PYTHON_EXECUTABLE,
         os.path.join(
             PROJECT_FOLDER,
             script
         )
     ]
+
+    print("Python:", PYTHON_EXECUTABLE)
+    print("Script:", script)
+    print()
 
     result = subprocess.run(
         command,
@@ -116,83 +104,52 @@ def run_step(
     )
 
     if result.stdout:
-
-        print(
-            result.stdout
-        )
+        print(result.stdout)
 
     if result.stderr:
-
-        print(
-            "ERROR OUTPUT:"
-        )
-
-        print(
-            result.stderr
-        )
+        print(result.stderr)
 
     if result.returncode != 0:
-
         print()
-        print(
-            f"{name} FAILED"
-        )
+        print("=" * 60)
+        print("STEP FAILED:", name)
+        print("EXIT CODE:", result.returncode)
+        print("=" * 60)
+        print()
 
-        print(
-            "Return code:",
-            result.returncode
-        )
-
-        sys.exit(
-            result.returncode
-        )
+        raise SystemExit(result.returncode)
 
     print()
-    print(
-        f"{name} completed successfully."
-    )
+    print("=" * 60)
+    print("STEP COMPLETED:", name)
+    print("=" * 60)
+    print()
 
 
 # ============================================================
-# STEP 1
+# PIPELINE
 # ============================================================
 
 run_step(
     "STEP 1: GENERATING INPUT",
-    MAIN_PYTHON,
     "src/generate_inputs.py"
 )
 
 
-# ============================================================
-# STEP 2
-# ============================================================
-
 run_step(
-    "STEP 2: RUNNING LAMMPS",
-    MAIN_PYTHON,
+    "STEP 2: RUNNING LAMMPS SIMULATION",
     "src/run_simulation.py"
 )
 
 
-# ============================================================
-# STEP 3
-# ============================================================
-
 run_step(
     "STEP 3: ANALYZING RESULTS",
-    MAIN_PYTHON,
     "src/analyze_results.py"
 )
 
 
-# ============================================================
-# STEP 4
-# ============================================================
-
 run_step(
     "STEP 4: OVITO VISUALIZATION",
-    OVITO_PYTHON,
     "src/Visualize.py"
 )
 
@@ -202,52 +159,9 @@ run_step(
 # ============================================================
 
 print()
-print()
 print("============================================================")
-print("             FULL PIPELINE COMPLETED")
+print("              PIPELINE COMPLETED SUCCESSFULLY")
 print("============================================================")
 print()
-
-print(
-    "Run ID:",
-    RUN_ID
-)
-
+print("RUN ID:", RUN_ID)
 print()
-
-print(
-    "Input generation       : COMPLETED"
-)
-
-print(
-    "LAMMPS simulation      : COMPLETED"
-)
-
-print(
-    "Result analysis        : COMPLETED"
-)
-
-print(
-    "OVITO visualization    : COMPLETED"
-)
-
-print()
-
-print("Generated outputs:")
-print()
-print("    results/properties.csv")
-print("    results/deformation_results.csv")
-print("    reports/elastic_constants.png")
-print("    reports/ovito_deformation.png")
-print("    reports/visualization_summary.txt")
-
-print()
-
-print("Simulation data:")
-print(
-    f"    simulations/{RUN_ID}/"
-)
-
-print()
-
-print("============================================================")
