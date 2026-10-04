@@ -1,6 +1,8 @@
 import subprocess
 import sys
 import os
+import json
+from datetime import datetime
 
 
 # ============================================================
@@ -8,9 +10,7 @@ import os
 # ============================================================
 
 PROJECT_FOLDER = os.path.dirname(
-    os.path.dirname(
-        os.path.abspath(__file__)
-    )
+    os.path.dirname(os.path.abspath(__file__))
 )
 
 
@@ -25,12 +25,56 @@ RUN_ID = os.environ.get(
 
 
 # ============================================================
-# PYTHON EXECUTABLE
+# STATUS FILE
 # ============================================================
 
-# Uses the Python interpreter currently running this pipeline.
-# Works locally and inside Docker/Render.
+RUN_FOLDER = os.path.join(
+    PROJECT_FOLDER,
+    "simulations",
+    RUN_ID
+)
+
+STATUS_FILE = os.path.join(
+    RUN_FOLDER,
+    "pipeline_status.json"
+)
+
+
+# ============================================================
+# PYTHON
+# ============================================================
+
 PYTHON_EXECUTABLE = sys.executable
+
+
+# ============================================================
+# STATUS FUNCTION
+# ============================================================
+
+def update_status(progress, stage, message, status="running"):
+
+    os.makedirs(RUN_FOLDER, exist_ok=True)
+
+    data = {
+        "status": status,
+        "progress": progress,
+        "stage": stage,
+        "experiment_id": RUN_ID,
+        "message": message,
+        "updated_at": datetime.now().isoformat(timespec="seconds")
+    }
+
+    with open(
+        STATUS_FILE,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
+        json.dump(
+            data,
+            file,
+            indent=4
+        )
 
 
 # ============================================================
@@ -44,7 +88,6 @@ print("============================================================")
 print()
 
 print("RUN ID:", RUN_ID)
-
 print()
 
 print("Pipeline:")
@@ -67,7 +110,6 @@ print()
 # ============================================================
 
 pipeline_environment = os.environ.copy()
-
 pipeline_environment["LAMMPS_RUN_ID"] = RUN_ID
 
 
@@ -75,7 +117,20 @@ pipeline_environment["LAMMPS_RUN_ID"] = RUN_ID
 # RUN FUNCTION
 # ============================================================
 
-def run_step(name, script):
+def run_step(
+    name,
+    script,
+    start_progress,
+    start_stage,
+    start_message
+):
+
+    update_status(
+        start_progress,
+        start_stage,
+        start_message,
+        "running"
+    )
 
     print()
     print("=" * 60)
@@ -110,6 +165,14 @@ def run_step(name, script):
         print(result.stderr)
 
     if result.returncode != 0:
+
+        update_status(
+            start_progress,
+            "FAILED",
+            f"{name} failed with exit code {result.returncode}.",
+            "failed"
+        )
+
         print()
         print("=" * 60)
         print("STEP FAILED:", name)
@@ -127,36 +190,104 @@ def run_step(name, script):
 
 
 # ============================================================
-# PIPELINE
+# INITIAL STATUS
+# ============================================================
+
+update_status(
+    10,
+    "INITIALIZING",
+    "LAMMPS automation pipeline started.",
+    "running"
+)
+
+
+# ============================================================
+# STEP 1
 # ============================================================
 
 run_step(
     "STEP 1: GENERATING INPUT",
-    "src/generate_inputs.py"
+    "src/generate_inputs.py",
+    20,
+    "INPUT GENERATION",
+    "Generating LAMMPS input files."
 )
 
+
+update_status(
+    35,
+    "INPUT READY",
+    "LAMMPS input files generated successfully.",
+    "running"
+)
+
+
+# ============================================================
+# STEP 2
+# ============================================================
 
 run_step(
     "STEP 2: RUNNING LAMMPS SIMULATION",
-    "src/run_simulation.py"
+    "src/run_simulation.py",
+    45,
+    "LAMMPS SIMULATION",
+    "LAMMPS simulation is running."
 )
 
+
+update_status(
+    60,
+    "LAMMPS COMPLETE",
+    "LAMMPS simulation completed successfully.",
+    "running"
+)
+
+
+# ============================================================
+# STEP 3
+# ============================================================
 
 run_step(
     "STEP 3: ANALYZING RESULTS",
-    "src/analyze_results.py"
+    "src/analyze_results.py",
+    70,
+    "RESULT ANALYSIS",
+    "Analyzing LAMMPS simulation results."
 )
 
 
+update_status(
+    78,
+    "ANALYSIS COMPLETE",
+    "Elastic constants and material properties calculated.",
+    "running"
+)
+
+
+# ============================================================
+# STEP 4
+# ============================================================
+
 run_step(
     "STEP 4: OVITO VISUALIZATION",
-    "src/Visualize.py"
+    "src/Visualize.py",
+    90,
+    "OVITO VISUALIZATION",
+    "Generating OVITO deformation analysis."
 )
 
 
 # ============================================================
 # COMPLETE
 # ============================================================
+
+update_status(
+    100,
+    "COMPLETED",
+    "LAMMPS automation completed successfully.",
+    "completed"
+)
+
 
 print()
 print("============================================================")
