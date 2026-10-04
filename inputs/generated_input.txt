@@ -1,0 +1,5 @@
+
+# LAMMPS simulation parameter
+
+variable temperature equal 300
+variable strain_rate equal 0.001

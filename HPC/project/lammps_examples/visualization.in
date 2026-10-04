@@ -1,0 +1,70 @@
+# ============================================================
+# Silicon deformation trajectory for OVITO visualization
+# ============================================================
+
+clear
+
+# Basic settings
+units metal
+dimension 3
+boundary p p p
+atom_style atomic
+
+# Silicon crystal
+variable a equal 5.431
+
+lattice diamond ${a}
+region box block 0 3 0 3 0 3
+create_box 1 box
+create_atoms 1 box
+
+mass 1 28.06
+
+# Stillinger-Weber potential
+pair_style sw
+pair_coeff * * Si.sw Si
+
+# Temperature
+variable temp equal 300.0
+variable seed equal 123457
+
+velocity all create ${temp} ${seed} mom yes rot yes dist gaussian
+
+# Thermostat
+fix temperature all nvt temp ${temp} ${temp} 0.1
+
+# ============================================================
+# Save atomic trajectory for OVITO
+# ============================================================
+
+dump trajectory all custom 10 dump.lammpstrj id type x y z
+dump_modify trajectory sort id
+
+# ============================================================
+# Equilibration
+# ============================================================
+
+thermo 100
+thermo_style custom step temp pe ke etotal press lx ly lz
+
+run 1000
+
+# ============================================================
+# Tensile deformation in X direction
+# ============================================================
+
+fix deformation all deform 1 x erate 0.0005 remap x
+
+run 5000
+
+# ============================================================
+# Finish
+# ============================================================
+
+unfix deformation
+unfix temperature
+undump trajectory
+
+print "========================================="
+print "Silicon deformation trajectory complete"
+print "========================================="

@@ -1,0 +1,6 @@
+{
+    "materials": "silicon",
+    "temperature": 300.0,
+    "deformation": 0.02,
+    "strain_rate": 0.001
+}
