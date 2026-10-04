@@ -186,6 +186,46 @@ with open(init_file, "w") as file:
 
 
 # ============================================================
+# TRAJECTORY OUTPUT FOR OVITO
+# displace.mod starts every deformation with "clear", which deletes
+# any dump. So the dump is created again after potential.mod is
+# included, and appended to the same dump.lammpstrj file.
+# ============================================================
+
+displace_file = os.path.join(
+    SIMULATION_FOLDER,
+    "displace.mod"
+)
+
+with open(displace_file, "r") as file:
+    displace_content = file.read()
+
+if re.search(r"^\s*dump\s", displace_content, re.MULTILINE):
+    print("displace.mod already has a dump command.")
+else:
+    dump_block = (
+        "\n# Trajectory output for OVITO (added automatically)\n"
+        "dump 1 all custom 10 dump.lammpstrj id type x y z\n"
+        "dump_modify 1 first yes append yes\n\n"
+    )
+
+    displace_content, count = re.subn(
+        r"^[ \t]*include[ \t]+potential\.mod[^\n]*\n",
+        lambda match: match.group(0) + dump_block,
+        displace_content,
+        count=1,
+        flags=re.MULTILINE
+    )
+
+    if count:
+        with open(displace_file, "w") as file:
+            file.write(displace_content)
+        print("Trajectory dump added to displace.mod")
+    else:
+        print("WARNING: 'include potential.mod' not found in displace.mod")
+
+
+# ============================================================
 # VERIFY GENERATED VALUES
 # ============================================================
 

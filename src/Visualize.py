@@ -1,14 +1,15 @@
+```python
 import os
 import csv
+
+import matplotlib
+matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
 
 from ovito.io import import_file
-from ovito.modifiers import (
-    CalculateDisplacementsModifier,
-    ColorCodingModifier
-)
-from ovito.vis import Viewport
+from ovito.modifiers import CalculateDisplacementsModifier
 
 
 # ============================================================
@@ -114,15 +115,8 @@ if not os.path.exists(DUMP_FILE):
     raise SystemExit(1)
 
 
-print(
-    "Loading LAMMPS trajectory..."
-)
-
-print(
-    "File:",
-    DUMP_FILE
-)
-
+print("Loading LAMMPS trajectory...")
+print("File:", DUMP_FILE)
 print()
 
 
@@ -131,18 +125,13 @@ print()
 # ============================================================
 
 pipeline = import_file(
-    DUMP_FILE
+    DUMP_FILE,
+    multiple_frames=True
 )
 
-num_frames = (
-    pipeline.source.num_frames
-)
+num_frames = pipeline.source.num_frames
 
-print(
-    "Frames:",
-    num_frames
-)
-
+print("Frames:", num_frames)
 print()
 
 
@@ -150,14 +139,10 @@ print()
 # DISPLACEMENT CALCULATION
 # ============================================================
 
-print(
-    "Calculating atomic displacement..."
-)
+print("Calculating atomic displacement...")
 
-displacement_modifier = (
-    CalculateDisplacementsModifier(
-        reference_frame=0
-    )
+displacement_modifier = CalculateDisplacementsModifier(
+    reference_frame=0
 )
 
 pipeline.modifiers.append(
@@ -166,31 +151,10 @@ pipeline.modifiers.append(
 
 
 # ============================================================
-# COLOR ATOMS
-# ============================================================
-
-print(
-    "Applying displacement coloring..."
-)
-
-color_modifier = (
-    ColorCodingModifier(
-        property="Displacement Magnitude"
-    )
-)
-
-pipeline.modifiers.append(
-    color_modifier
-)
-
-
-# ============================================================
 # FINAL FRAME
 # ============================================================
 
-final_frame = (
-    num_frames - 1
-)
+final_frame = num_frames - 1
 
 data = pipeline.compute(
     final_frame
@@ -200,28 +164,27 @@ particles = data.particles
 
 num_atoms = particles.count
 
-print(
-    "Atoms:",
-    num_atoms
-)
-
-print(
-    "Final frame:",
-    final_frame
-)
-
+print("Atoms:", num_atoms)
+print("Final frame:", final_frame)
 print()
+
+
+# ============================================================
+# GET POSITIONS
+# ============================================================
+
+positions = np.asarray(
+    particles["Position"]
+)
 
 
 # ============================================================
 # GET DISPLACEMENT DATA
 # ============================================================
 
-displacement_property = (
-    particles[
-        "Displacement Magnitude"
-    ]
-)
+displacement_property = particles[
+    "Displacement Magnitude"
+]
 
 displacement_values = np.asarray(
     displacement_property
@@ -233,21 +196,15 @@ displacement_values = np.asarray(
 # ============================================================
 
 mean_disp = float(
-    np.mean(
-        displacement_values
-    )
+    np.mean(displacement_values)
 )
 
 max_disp = float(
-    np.max(
-        displacement_values
-    )
+    np.max(displacement_values)
 )
 
 min_disp = float(
-    np.min(
-        displacement_values
-    )
+    np.min(displacement_values)
 )
 
 q25 = float(
@@ -272,25 +229,19 @@ q75 = float(
 )
 
 
-print(
-    "Atomic displacement analysis completed."
-)
-
+print("Atomic displacement analysis completed.")
 print()
 
 print(
-    f"Mean displacement    : "
-    f"{mean_disp:.6f}"
+    f"Mean displacement    : {mean_disp:.6f}"
 )
 
 print(
-    f"Maximum displacement : "
-    f"{max_disp:.6f}"
+    f"Maximum displacement : {max_disp:.6f}"
 )
 
 print(
-    f"Minimum displacement : "
-    f"{min_disp:.6f}"
+    f"Minimum displacement : {min_disp:.6f}"
 )
 
 print()
@@ -300,9 +251,7 @@ print()
 # SAVE CSV
 # ============================================================
 
-print(
-    "Saving displacement CSV..."
-)
+print("Saving displacement CSV...")
 
 with open(
     CSV_FILE,
@@ -310,9 +259,7 @@ with open(
     newline=""
 ) as file:
 
-    writer = csv.writer(
-        file
-    )
+    writer = csv.writer(file)
 
     writer.writerow(
         [
@@ -334,356 +281,98 @@ with open(
         )
 
 
-print(
-    "CSV saved:",
-    CSV_FILE
-)
-
+print("CSV saved:", CSV_FILE)
 print()
 
 
 # ============================================================
-# ADD PIPELINE TO SCENE
+# HEADLESS 3D VISUALIZATION
 # ============================================================
 
-pipeline.add_to_scene()
+print("Generating headless 3D visualization...")
 
-
-# ============================================================
-# VIEWPORT
-# ============================================================
-
-viewport = Viewport(
-    type=Viewport.Type.PERSPECTIVE,
-    camera_dir=(1, 1, 1)
+fig = plt.figure(
+    figsize=(14, 10),
+    dpi=100
 )
 
-viewport.zoom_all()
-
-
-# ============================================================
-# RENDER IMAGE
-# ============================================================
-
-print(
-    "Rendering OVITO visualization..."
+ax = fig.add_subplot(
+    111,
+    projection="3d"
 )
 
-viewport.render_image(
-    filename=IMAGE_FILE,
-    size=(1400, 1000),
-    frame=final_frame,
-    background=(1, 1, 1)
+scatter = ax.scatter(
+    positions[:, 0],
+    positions[:, 1],
+    positions[:, 2],
+    c=displacement_values,
+    cmap="viridis",
+    s=18
 )
 
-pipeline.remove_from_scene()
-
-print(
-    "Base visualization rendered."
+ax.set_title(
+    "OVITO Deformation Analysis",
+    fontsize=18,
+    pad=20
 )
 
-print()
-
-
-# ============================================================
-# ADD DATA TO IMAGE
-# ============================================================
-
-print(
-    "Adding analysis data to image..."
+ax.set_xlabel(
+    "X Position"
 )
 
-image = Image.open(
-    IMAGE_FILE
-).convert("RGB")
-
-draw = ImageDraw.Draw(
-    image
+ax.set_ylabel(
+    "Y Position"
 )
 
+ax.set_zlabel(
+    "Z Position"
+)
 
-# ============================================================
-# FONT
-# ============================================================
+colorbar = fig.colorbar(
+    scatter,
+    ax=ax,
+    pad=0.10,
+    shrink=0.65
+)
 
-try:
+colorbar.set_label(
+    "Displacement Magnitude"
+)
 
-    font_title = ImageFont.truetype(
-        "arial.ttf",
-        28
+ax.text2D(
+    0.02,
+    0.94,
+    (
+        f"Run ID: {RUN_ID}\n"
+        f"Atoms: {num_atoms}\n"
+        f"Frames: {num_frames}\n"
+        f"Final Frame: {final_frame}\n\n"
+        f"Mean: {mean_disp:.6f}\n"
+        f"Minimum: {min_disp:.6f}\n"
+        f"Maximum: {max_disp:.6f}"
+    ),
+    transform=ax.transAxes,
+    fontsize=11,
+    verticalalignment="top",
+    bbox=dict(
+        boxstyle="round",
+        facecolor="white",
+        alpha=0.9
     )
-
-    font_data = ImageFont.truetype(
-        "arial.ttf",
-        22
-    )
-
-except:
-
-    font_title = ImageFont.load_default()
-    font_data = ImageFont.load_default()
-
-
-# ============================================================
-# DATA BOX
-# ============================================================
-
-box_x = 35
-box_y = 35
-
-box_width = 430
-box_height = 280
-
-draw.rectangle(
-    [
-        box_x,
-        box_y,
-        box_x + box_width,
-        box_y + box_height
-    ],
-    fill="white",
-    outline="black",
-    width=3
 )
 
+plt.tight_layout()
 
-draw.text(
-    (
-        box_x + 20,
-        box_y + 15
-    ),
-    "OVITO DEFORMATION ANALYSIS",
-    fill="black",
-    font=font_title
+plt.savefig(
+    IMAGE_FILE,
+    dpi=150,
+    bbox_inches="tight"
 )
 
+plt.close(fig)
 
-data_lines = [
-
-    f"Run ID             : {RUN_ID}",
-
-    f"Atoms              : {num_atoms}",
-
-    f"Frames             : {num_frames}",
-
-    f"Final Frame        : {final_frame}",
-
-    "",
-
-    f"Mean Displacement  : {mean_disp:.6f}",
-
-    f"Minimum            : {min_disp:.6f}",
-
-    f"Maximum            : {max_disp:.6f}"
-
-]
-
-
-text_y = box_y + 65
-
-
-for line in data_lines:
-
-    draw.text(
-        (
-            box_x + 20,
-            text_y
-        ),
-        line,
-        fill="black",
-        font=font_data
-    )
-
-    text_y += 27
-
-
-# ============================================================
-# DISPLACEMENT SCALE
-# ============================================================
-
-scale_x = 1280
-scale_y = 250
-
-scale_width = 45
-scale_height = 420
-
-
-for i in range(
-    scale_height
-):
-
-    ratio = (
-        i /
-        (scale_height - 1)
-    )
-
-    if ratio < 0.25:
-
-        t = (
-            ratio /
-            0.25
-        )
-
-        r = 0
-        g = int(
-            255 * t
-        )
-        b = int(
-            255 * (1 - t)
-        )
-
-    elif ratio < 0.50:
-
-        t = (
-            (ratio - 0.25)
-            / 0.25
-        )
-
-        r = 0
-        g = 255
-        b = int(
-            255 * (1 - t)
-        )
-
-    elif ratio < 0.75:
-
-        t = (
-            (ratio - 0.50)
-            / 0.25
-        )
-
-        r = int(
-            255 * t
-        )
-        g = 255
-        b = 0
-
-    else:
-
-        t = (
-            (ratio - 0.75)
-            / 0.25
-        )
-
-        r = 255
-        g = int(
-            255 * (1 - t)
-        )
-        b = 0
-
-
-    y = scale_y + i
-
-    draw.line(
-        [
-            scale_x,
-            y,
-            scale_x + scale_width,
-            y
-        ],
-        fill=(r, g, b),
-        width=1
-    )
-
-
-draw.rectangle(
-    [
-        scale_x,
-        scale_y,
-        scale_x + scale_width,
-        scale_y + scale_height
-    ],
-    outline="black",
-    width=2
-)
-
-
-# ============================================================
-# SCALE LABEL
-# ============================================================
-
-draw.text(
-    (
-        scale_x - 120,
-        scale_y - 40
-    ),
-    "Displacement",
-    fill="black",
-    font=font_data
-)
-
-
-draw.text(
-    (
-        scale_x + 55,
-        scale_y - 5
-    ),
-    f"{max_disp:.3f}",
-    fill="black",
-    font=font_data
-)
-
-
-draw.text(
-    (
-        scale_x + 55,
-        scale_y + scale_height * 0.25 - 10
-    ),
-    f"{q75:.3f}",
-    fill="black",
-    font=font_data
-)
-
-
-draw.text(
-    (
-        scale_x + 55,
-        scale_y + scale_height * 0.50 - 10
-    ),
-    f"{q50:.3f}",
-    fill="black",
-    font=font_data
-)
-
-
-draw.text(
-    (
-        scale_x + 55,
-        scale_y + scale_height * 0.75 - 10
-    ),
-    f"{q25:.3f}",
-    fill="black",
-    font=font_data
-)
-
-
-draw.text(
-    (
-        scale_x + 55,
-        scale_y + scale_height - 15
-    ),
-    f"{min_disp:.3f}",
-    fill="black",
-    font=font_data
-)
-
-
-# ============================================================
-# SAVE IMAGE
-# ============================================================
-
-image.save(
-    IMAGE_FILE
-)
-
-print(
-    "Final visualization saved:"
-)
-
-print(
-    IMAGE_FILE
-)
-
+print("Visualization rendered successfully.")
+print("Image:", IMAGE_FILE)
 print()
 
 
@@ -764,22 +453,16 @@ with open(
     )
 
     file.write(
-        "The rendered image contains the "
-        "numerical displacement statistics "
-        "and displacement scale.\n"
+        "The visualization is generated using "
+        "headless Matplotlib rendering.\n"
     )
 
 
-print(
-    "Summary saved:"
-)
-
-print(
-    SUMMARY_FILE
-)
-
+print("Summary saved:")
+print(SUMMARY_FILE)
 print()
 
 print("========================================")
 print("       OVITO ANALYSIS COMPLETE")
 print("========================================")
+```
